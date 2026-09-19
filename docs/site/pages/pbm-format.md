@@ -1,8 +1,15 @@
-# PoiBuilder Retro Map Binary Format Specification (.pbm)
-**Version: 3.0 (PBM3)**  
-**Status: Formal Standard**  
-**Author: PoiBuilder Project**  
-**Date: 2026-09-10**
+---
+title: The PBM format specification
+lead: The .pbm v3 binary map format, normative and complete — file layout, chunks, the standard emitters lump, and the consumer rules. What the exporter writes and the reference PSP engine reads.
+---
+
+This page is the normative format document for the `.pbm` map, maintained in the
+repository as [`SPEC_RETRO_FORMAT.md`](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md).
+A writer is the editor's exporter (`addons/poibuilder/export/pb_map_exporter.gd`);
+the reference reader is the demo engine's loader
+([`pbm.h`](https://github.com/Francesco149/poibuilder/blob/master/retro_engine/psp/pbm.h)
++ [`pbm_loader.c`](https://github.com/Francesco149/poibuilder/blob/master/retro_engine/psp/pbm_loader.c)).
+Every byte below is cross-checked against both.
 
 > **What v3 added on top of that:** the standard lumps in §8 — payload layouts
 > the specification defines, carried by the extensible metadata table (§7). They

@@ -48,7 +48,7 @@ One click to a retro .pbm map.
 
 A scrolling texture is a property of the **material**: the Material dock writes a speed (in texture repeats per second, per UV axis, signed — negative V falls down a wall) onto the material, and the editor viewport animates it live. The exports carry the *speed*, not the animation — whichever consumer wants motion applies the one-line recipe `uv(t) = uv(0) + t · speed`:
 
-- **PBM** — each mesh's header stores `uv_scroll_u` / `uv_scroll_v` ([format §5.1](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md)), and the bake exempts scrolling faces from the tile atlas so the face keeps a texture that can slide. For a proven implementation, read the reference PSP engine — `retro_engine/psp/psp_render.c` applies the offset per moving mesh on the device — or the Godot viewer, which replays it the same way.
+- **PBM** — each mesh's header stores `uv_scroll_u` / `uv_scroll_v` ([format §5.1](pbm-format.html#5-1-standard-specification-animated-uv-scrolling)), and the bake exempts scrolling faces from the tile atlas so the face keeps a texture that can slide. For a proven implementation, read the reference PSP engine — `retro_engine/psp/psp_render.c` applies the offset per moving mesh on the device — or the Godot viewer, which replays it the same way.
 - **GLB (either flavor)** — the speed rides the material's glTF `extras` as `"poi_uv_scroll": [u, v]` (repeats per second), in both the retro and modern bakes. A consumer that wants the falls to fall reads that record and offsets the material's UVs over time; without those few lines the GLB shows the water at rest — which is exactly what a static glTF viewer will do.
 
 > [gotcha] Do not splat-paint a scrolling face. Paint bakes to a static tile; keep painted and scrolling surfaces on separate faces.
@@ -88,7 +88,7 @@ gameplay, no scripting, no toolchain polish, and it never will.
 The contract is the **file format**, not the demo:
 
 - The `.pbm` binary layout is fully specified in
-  [`SPEC_RETRO_FORMAT.md`](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md) —
+  [The PBM format specification](pbm-format.html) —
   write your own loader against it in your engine of choice.
 - The demo engine in the repo is a **reference implementation**: read its
   loader (`retro_engine/psp/pbm_loader.c`) and renderer to see how the format

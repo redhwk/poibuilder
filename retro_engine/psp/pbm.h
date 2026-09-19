@@ -28,8 +28,8 @@
 #define PBM_TEX_FMT_RGB565   3
 
 typedef struct __attribute__((packed)) {
-    uint32_t magic;         /* "PBM2" (0x324D4250) */
-    uint32_t version;       /* 2 */
+    uint32_t magic;         /* "PBM3" (0x334D4250); PBM2/PBM1 still load */
+    uint32_t version;       /* 3 */
     uint32_t num_textures;  /* Count of textures */
     uint32_t num_meshes;    /* Count of meshes */
     uint32_t num_colliders; /* Count of colliders */

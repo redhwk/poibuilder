@@ -2050,7 +2050,8 @@ static func _write_pbm_from_tree(root: Node, export_tree: Node, file_path: Strin
 			m_min.z = minf(m_min.z, v["z"]); m_max.z = maxf(m_max.z, v["z"])
 		f.store_float(m_min.x); f.store_float(m_min.y); f.store_float(m_min.z)
 		f.store_float(m_max.x); f.store_float(m_max.y); f.store_float(m_max.z)
-		# PBM 2.1 animated UV scroll (was `reserved[2]`, always 0.0 before).
+		# PBM 3.0 animated UV scroll: v1/v2 mesh headers simply ended 8 bytes
+		# earlier (64 bytes), so old files load as static meshes (spec §3.1).
 		var scroll: Vector2 = m.get("uv_scroll", Vector2.ZERO)
 		f.store_float(scroll.x)
 		f.store_float(scroll.y)

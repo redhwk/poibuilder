@@ -51,7 +51,7 @@ What "stateless" means, and why it is the headline: an emitter is authored as an
 - additive emitters need no depth sorting; blended ones draw back-to-front;
 - exportable as **data** — the retro `.pbm` carries a standard `emitters` lump and a modern `.glb` tags each emitter node with a `poi_emitter` record in its glTF extras (count, colors, spread — the whole authoring), so your engine rebuilds the identical effect instead of eyeballing it.
 
-Placement knobs are budget-aware for the retro target: 64 particles per emitter and roughly 256 per map. See [Export & retro](export.html) for what ships and the [format spec](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md) for the lump layout.
+Placement knobs are budget-aware for the retro target: 64 particles per emitter and roughly 256 per map. See [Export & retro](export.html) for what ships and the [format spec](pbm-format.html) for the lump layout.
 
 ## Scroll
 

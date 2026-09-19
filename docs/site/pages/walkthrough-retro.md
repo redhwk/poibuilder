@@ -43,7 +43,7 @@ Authoring constraints for the target are documented in the [Retro Authoring Guid
 
 ## 3. The format is the contract
 
-The `.pbm` binary layout is fully specified in [`SPEC_RETRO_FORMAT.md`](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md) — geometry, tiles, lights, billboards, emitters, colliders, the environment lump, and the consumer-side performance rules the format was designed around.
+The `.pbm` binary layout is fully specified in [The PBM format specification](pbm-format.html) — geometry, tiles, lights, billboards, emitters, colliders, the environment lump, and the consumer-side performance rules the format was designed around.
 
 **To run your map in your own retro engine, implement the format against that spec.** The repository's PSP homebrew engine is the **reference implementation**:
 

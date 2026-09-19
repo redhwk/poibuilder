@@ -30,6 +30,7 @@ walkthrough-retro.md Export to PSP / retro
 Retro
 grid.md Grid
 export.md Export & retro
+pbm-format.md PBM format
 
 Reference
 performance.md Performance

@@ -650,7 +650,15 @@ def _format_icon(raw: str) -> str:
 
 def inline(s: str) -> str:
     s = html.escape(s)
-    s = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", s)
+    # Stash code spans BEFORE emphasis/link processing: the single-star
+    # emphasis regex otherwise eats `a * b * c` inside a code chip.
+    code_spans: list[str] = []
+
+    def _stash(m):
+        code_spans.append(m.group(1))
+        return f"\x00{len(code_spans) - 1}\x00"
+
+    s = re.sub(r"`([^`]+)`", _stash, s)
     s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
     s = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", s)
     s = re.sub(
@@ -671,7 +679,11 @@ def inline(s: str) -> str:
     # |-label inside a table would shatter into raw-text cells.
     s = re.sub(r"\[\[btn:([a-z_0-9]+)::([^\]]+)\]\]",
                lambda m: render_btn_ref(m.group(1), m.group(2).strip()), s)
-    return s
+
+    def _unstash(m):
+        return f"<code>{code_spans[int(m.group(1))]}</code>"
+
+    return re.sub(r"\x00(\d+)\x00", _unstash, s)
 
 
 def is_pot_image_missing(src: str, out_dir: Path) -> bool:
@@ -810,12 +822,13 @@ def render_md(src: str, out_dir: Path, strict: bool) -> str:
             out.append("<hr>")
             i += 1
             continue
-        if line.startswith("> "):
+        if line.startswith(">"):
             flush_para(para)
             kind = ""
             buf = []
-            while i < len(lines) and lines[i].startswith("> "):
-                t = lines[i][2:]
+            while i < len(lines) and (lines[i].startswith("> ") or lines[i].rstrip() == ">"):
+                # A bare ">" is an empty line INSIDE the quote, not its end.
+                t = lines[i][2:].strip() if lines[i].startswith("> ") else ""
                 if t.startswith("[gotcha]"):
                     kind = " gotcha"
                     t = t[len("[gotcha]"):].strip()

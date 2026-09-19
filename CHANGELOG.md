@@ -3,6 +3,39 @@
 Historical record of development phases, sign-off rounds, and version notes (v0.7.0 through v0.9.105).
 Active project instructions and conventions live in [CLAUDE.md](CLAUDE.md).
 
+## v0.9.167 — the PBM format spec lives on the docs site, corrected against both implementations
+
+The website gains a "PBM format" reference page: the full normative
+SPEC_RETRO_FORMAT.md, adapted to the site and CROSS-CHECKED byte-by-byte
+against the two implementations (the exporter that writes the files and
+the PSP loader that reads them). The check caught real spec drift, now
+fixed in both the repo spec and the web page:
+
+- §2 file layout claimed texture pixel buffers are "16-byte aligned" and
+  vertex buffers "aligned". FALSE: the format is fully packed — the
+  exporter writes payloads back-to-back and the reference loader reads
+  them sequentially, with exactly one exception (metadata payloads pad
+  to 4 bytes). A consumer written from the old diagram would have
+  misread every texture after the first. The diagram and prose now state
+  the packed truth, including that a consumer aligns its own COPY (the
+  PSP loader swizzles into 16-byte-aligned VRAM after reading).
+- §4 swizzling wording implied the file might carry pre-swizzled texels.
+  The file is always plain linear row-major; the swizzle is a VRAM-side
+  load step. Now stated explicitly.
+- §7 documents the standard metadata tags both implementations carry
+  beyond the §9 recipes: `map_name` and `env_preset`
+  (PBM_META_STRING), written by every export, read by the demo engine.
+- LaTeX math fragments ($...$, \text) replaced with plain Unicode so the
+  page renders everywhere; verified at full resolution section by
+  section.
+
+Also fixed to match reality: stale comments in `pbm.h` (PbmHeader said
+"PBM2"/version 2 — it is PBM3/version 3) and in the exporter (scroll
+words described as "PBM 2.1 reserved[2]" — they are the v3 header's
+uv_scroll fields; v1/v2 headers simply ended 8 bytes earlier). Docs
+builder: a bare `>` line inside a blockquote no longer leaks into the
+page as a stray paragraph.
+
 ## v0.9.166 — arming cannot touch snapping, honest doc shots, nightly release notes with the shortlog
 
 ### Arming a shape placement provably preserves the snap state

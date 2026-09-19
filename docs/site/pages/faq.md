@@ -45,7 +45,7 @@ No. The PSP engine in the repository is a **proof of concept and
 a performance sanity check** — it exists to validate the `.pbm` format and
 measure it on real hardware. The format is the contract: implement a loader
 in your own engine from
-[`SPEC_RETRO_FORMAT.md`](https://github.com/Francesco149/poibuilder/blob/master/SPEC_RETRO_FORMAT.md),
+[The PBM format specification](pbm-format.html),
 using the demo engine's loader as a reference. Details on [Export & retro](export.html).
 
 ## My map chugs when I play the PoiBuilder scene
