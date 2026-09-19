@@ -3,6 +3,44 @@
 Historical record of development phases, sign-off rounds, and version notes (v0.7.0 through v0.9.105).
 Active project instructions and conventions live in [CLAUDE.md](CLAUDE.md).
 
+## v0.9.166 — arming cannot touch snapping, honest doc shots, nightly release notes with the shortlog
+
+### Arming a shape placement provably preserves the snap state
+
+Report: arming from the New Shape menu (unlike the dock Shapes panel)
+"disabled snapping", and repeated menu arms appeared to FLIP the snap
+toggle — with the caveat that the state was likely already invalid.
+Extensive real-UI probing (synthesized menu-popup clicks, a completed
+drag-create, re-arms, the dock path; against both the released v0.9.164
+tree and master) could NOT reproduce a flip: grid.enabled stayed put
+through every step on both paths. What the report DID expose: nothing
+guaranteed that outcome. `_on_shape_requested` now snapshots
+`grid.enabled` before arming and re-asserts it after the context update —
+arming cannot decide snapping anymore, whatever internal apply/restore
+ordering does. The GUI harness gains the SNAP-PRESERVE regression checks
+(arm with snap ON stays ON and the armed hover point actually snaps; arm
+with snap OFF stays OFF; default is ON on a fresh editor).
+
+### The doc screenshots tell the truth
+
+- `create-floor.png` now catches the HEIGHT stage while the box rises
+  ABOVE the floor (with the extents readout) — the old frame read as
+  extrusion into the floor.
+- `select-texture.png` dresses the cube in BRICK (the caption always said
+  brick; the shot showed wood planks) and lands mid-drag so the move
+  gizmo is visible on the selected face while the texture slides.
+- `select-smart.png` catches the FACE-LOOP step — the olive band of 12
+  quads wrapping the cube — instead of the late edge-conversion state
+  that read as "face edges selected".
+
+### The nightly release describes itself
+
+The nightly workflow now fetches the PREVIOUS nightly tag before
+retargeting it and writes a release body with the plugin VERSION (read
+from plugin.cfg), the short subject of every commit since that previous
+nightly — each hash linked to its commit page for the full message — and
+the install steps (first run falls back to the last 20 commits).
+
 ## v0.9.165 — docs round: three install paths, texture mode gets its page section, stateless emitters documented, the toolbar Export icon stops reading as disabled, and every doc screenshot re-taken on the current UI
 
 ### The Export toolbar button no longer LOOKS disabled

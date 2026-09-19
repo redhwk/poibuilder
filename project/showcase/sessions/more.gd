@@ -407,12 +407,12 @@ func _select_snap() -> void:
 	await d.cam_swing(f["center"], 34.0, 78.0, 22.0, 30.0, f["dist"] * 0.95, 36, 1, f["aim"])
 ## Texture mode ([[kbd:6]]-equivalent toolbar button): the move gizmo slides
 ## the selected faces' UVs across the material while the geometry stays put.
-## A directional texture (wood planks) makes the slide legible in a still.
+## A directional brick makes the slide legible in a still.
 func _texture_mode() -> void:
 	obj = await _fresh("TextureModeCube", PBMeshData.create_cube(2.0), "steel",
 		Vector3.ZERO, 0.44, 32.0, 20.0)
 	await d.off(func():
-		ShowcaseUtil.dress(obj, "res://materials/textures/wood_planks.png"))
+		ShowcaseUtil.dress(obj, "res://materials/brick_dark_red.tres"))
 	await d.frames(8)
 
 	# Select the camera-facing (+Z) face — by computed id, not by hoping the

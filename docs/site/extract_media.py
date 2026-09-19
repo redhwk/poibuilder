@@ -40,13 +40,13 @@ DOC_SHOTS: dict[str, tuple[str, str, int, tuple[int, int, int, int]]] = {
     # CSG booleans: clean circular tunnel cut through stone wall with brick interior
     "csg-booleans": ("more", "more_csg", 120, (287, 80, 1266, 712)),
     # Smart select: dark charcoal cube with yellow coplanar face highlight
-    "select-smart": ("more", "more_select_snap", 360, (287, 80, 1266, 712)),
+    "select-smart": ("more", "more_select_snap", 140, (287, 80, 1266, 712)),
     # Texture mode: wood-plank cube, front face selected, UVs slid sideways —
     # the gizmo still hovers and the planks visibly no longer align the cube.
-    "select-texture": ("more", "more_texture", 140, (287, 80, 1266, 712)),
+    "select-texture": ("more", "more_texture", 94, (287, 80, 1266, 712)),
 
     # Creation beats
-    "create-floor": ("create", "create_surfaces", 140, (287, 80, 1266, 712)),
+    "create-floor": ("create", "create_surfaces", 145, (287, 80, 1266, 712)),
     "create-wall": ("create", "create_surfaces", 380, (287, 80, 1266, 712)),
     "create-stairs": ("create", "create_stairs", 220, (287, 80, 1266, 712)),
     "create-door": ("create", "create_door", 200, (287, 80, 1266, 712)),

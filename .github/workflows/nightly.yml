@@ -40,6 +40,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The changelog section needs the PREVIOUS nightly commit: fetch the
+          # tag before it is retargeted below. First run (no tag yet): the
+          # changelog falls back to the last 20 commits.
+          PREV_SHA=""
+          if git fetch origin nightly --no-tags 2>/dev/null; then
+            PREV_SHA=$(git rev-parse FETCH_HEAD)
+          fi
+
           # Replace the previous nightly release if one exists (without
           # --cleanup-tag, which would delete the tag both on remote and locally
           # and cause subsequent git push failures).
@@ -50,9 +58,25 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f nightly
           git push -f origin nightly
+
+          VERSION=$(sed -n 's/^version="\(.*\)"/\1/p' project/addons/poibuilder/plugin.cfg)
+          HEAD_SHA=$(git rev-parse --short HEAD)
           {
-            echo "Automatic alpha build of PoiBuilder at commit"\
-              "$(git rev-parse --short HEAD)."
+            echo "PoiBuilder **v${VERSION}** — automatic alpha build of master."
+            echo
+            echo "Built from [$HEAD_SHA](https://github.com/Francesco149/poibuilder/commit/$(git rev-parse HEAD))"\
+              "($(git log -1 --date=short --format='%ad'))."
+            echo
+            echo "### Changes since the previous nightly"
+            echo
+            if [ -n "$PREV_SHA" ]; then
+              git log --format='- %s ([%h](https://github.com/Francesco149/poibuilder/commit/%H))' "$PREV_SHA..HEAD"
+              if [ "$(git rev-list --count "$PREV_SHA..HEAD")" = "0" ]; then
+                echo "- no new commits; rebuild of the same tree"
+              fi
+            else
+              git log --max-count=20 --format='- %s ([%h](https://github.com/Francesco149/poibuilder/commit/%H))'
+            fi
             echo
             echo "### Install"
             echo "1. Download \`PoiBuilder-nightly.zip\` below."
@@ -65,9 +89,6 @@ jobs:
             echo
             echo "This is an **alpha** release: expect rough edges and file"\
               "breaking changes in saved scenes until 1.0."
-            echo
-            echo "Built from $(git rev-parse --short HEAD)"\
-              "($(git log -1 --date=short --format='%ad')) on the master branch."
           } > notes.md
           gh release create nightly PoiBuilder-nightly.zip \
             --title "PoiBuilder nightly $(date -u +%Y-%m-%d)" \

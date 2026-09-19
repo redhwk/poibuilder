@@ -95,7 +95,7 @@ var _last_scroll_scan_msec: int = -10000
 func _get_plugin_name() -> String:
 	return "PoiBuilder"
 
-const VERSION := "0.9.165"
+const VERSION := "0.9.166"
 
 func _enter_tree():
 	logger.info("plugin", "PoiBuilder v%s entering tree" % VERSION)
@@ -2580,6 +2580,10 @@ func _on_shape_requested(shape_id: StringName) -> void:
 	if shape_id == &"ngon" or shape_id == &"ngon_draw":
 		_start_ngon_shape_tool()
 		return
+	# Arming must never decide snapping: whatever the user's snap state is,
+	# it survives the arm unchanged (a stale apply/restore inside the context
+	# update must not get the last word).
+	var snap_state_before_arm := grid.enabled
 	shape_creator.arm(shape_id)
 	# Trim depth carries across the project: a trim "starts at the last Depth
 	# you set in this project (5 cm before you set one)" — it is never dragged,
@@ -2589,6 +2593,8 @@ func _on_shape_requested(shape_id: StringName) -> void:
 	# Arming is a PoiBuilder context change too: the engine grid hides and
 	# the elevated PB grid shows while drawing (engine-bridge a no-op).
 	_update_editing_context()
+	if grid.enabled != snap_state_before_arm:
+		grid.enabled = snap_state_before_arm
 
 	if shape_id == &"sprite":
 		_set_creation_hint("%s — click a surface to anchor it (Esc cancels)"

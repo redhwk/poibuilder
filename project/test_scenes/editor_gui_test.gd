@@ -304,6 +304,52 @@ func _run() -> void:
 			else:
 				_pass("CURSOR-MARKER: scenario cursor square hides when creation ends")
 
+		# ── Test 2b: ARMING must not change the snapping state ──────────────────
+		# Regression guard: an arm runs the context update, and any stale
+		# apply/restore in there must not get the last word over grid.enabled —
+		# the user's snap state survives arming unchanged (default ON included).
+		var snap_before: bool = plugin0.grid.enabled
+		plugin0._on_shape_requested(&"cylinder")
+		await _frames(8)
+		if plugin0.grid.enabled != snap_before:
+			_fail("SNAP-PRESERVE: arming flipped grid.enabled (%s -> %s)"
+				% [str(snap_before), str(plugin0.grid.enabled)])
+		elif not plugin0.grid.enabled:
+			_fail("SNAP-PRESERVE: fresh editor expected snap ON")
+		else:
+			_pass("SNAP-PRESERVE: arming left snap ON alone")
+		# The armed hover point must actually snap while armed (ON case).
+		_mouse_motion(_window_pos(vp, host, Vector3(2, 0.0, 2.0)))
+		await _frames(6)
+		var hp_snap: Vector3 = plugin0.gizmo_plugin.creation_hover_point
+		var grid_step: float = plugin0.grid.step()
+		if hp_snap != Vector3.ZERO \
+				and absf(hp_snap.x - roundf(hp_snap.x / grid_step) * grid_step) < 0.001 \
+				and absf(hp_snap.z - roundf(hp_snap.z / grid_step) * grid_step) < 0.001:
+			_pass("SNAP-PRESERVE: armed hover snaps with snap ON")
+		else:
+			_fail("SNAP-PRESERVE: armed hover did not snap with snap ON (%s, step %.2f)"
+				% [str(hp_snap), grid_step])
+		_press_key(KEY_ESCAPE)
+		await _frames(6)
+		# The OFF case: snap off, arm, verify arming did not turn it back on.
+		plugin0.grid.enabled = false
+		await _frames(4)
+		plugin0._on_shape_requested(&"cylinder")
+		await _frames(8)
+		if plugin0.grid.enabled:
+			_fail("SNAP-PRESERVE: arming turned snapping back ON (OFF case)")
+		else:
+			_pass("SNAP-PRESERVE: arming preserved snap OFF")
+		_press_key(KEY_ESCAPE)
+		await _frames(6)
+		plugin0.grid.enabled = true
+		await _frames(4)
+		if plugin0.grid.enabled:
+			_pass("SNAP-PRESERVE: snap restored for later tests")
+		else:
+			_fail("SNAP-PRESERVE: could not restore snap ON after the OFF case")
+
 	# ── Setup: two cubes, camera framing both ────────────────────────────────
 	var a := PBMesh.create_cube(1.0)
 	a.name = "GuiTestA"
