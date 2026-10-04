@@ -386,7 +386,7 @@ func _redraw(gizmo) -> void:
 	# Checked FIRST: preview_node draws its overlay without requiring mesh_data!
 	if ngon_drawer != null and ngon_drawer.is_active():
 		if ngon_drawer.preview_node == node:
-			if ngon_drawer.state == PBNgonDrawer.State.HEIGHT:
+			if ngon_drawer.state == PBNgonDrawer.PBState.HEIGHT:
 				_draw_ngon_height_preview(gizmo, node.pb_mesh_data, ngon_drawer)
 			else:
 				_draw_ngon_drawer_overlay(gizmo, node.pb_mesh_data, ngon_drawer)
@@ -978,7 +978,7 @@ func _draw_creation_preview(gizmo, mesh_data: PBMeshData, creator: PBShapeCreato
 	# PARAMS: the shape is placed and the adjust modal is open — the cyan
 	# base/bounds box only buries the actual trim/shape the user is trying
 	# to see. Draw nothing but the mesh.
-	if creator.state == PBShapeCreator.State.PARAMS:
+	if creator.state == PBShapeCreator.PBState.PARAMS:
 		return
 	_creation_materials()
 	var node := gizmo.get_node_3d() as Node3D
@@ -987,7 +987,7 @@ func _draw_creation_preview(gizmo, mesh_data: PBMeshData, creator: PBShapeCreato
 	var to_local := node.global_transform.affine_inverse()
 	var creation_offset: float = _live_stroke_offset * 1.5
 
-	if creator.state == PBShapeCreator.State.BASE:
+	if creator.state == PBShapeCreator.PBState.BASE:
 		var corners := creator.base_rect_corners()
 		var lines := PackedVector3Array()
 		for i in range(corners.size()):
@@ -1046,7 +1046,7 @@ func _draw_creation_preview(gizmo, mesh_data: PBMeshData, creator: PBShapeCreato
 
 	# Height plane: when Alt is held while raising a shape, draw a translucent
 	# infinite white plane at 0.25 opacity at the shape's current height.
-	if creator.state == PBShapeCreator.State.HEIGHT and creator.show_height_plane:
+	if creator.state == PBShapeCreator.PBState.HEIGHT and creator.show_height_plane:
 		var lifted_local: Vector3 = to_local * lifted
 		gizmo.add_mesh(_get_height_plane_mesh(), _get_height_plane_material(),
 			Transform3D(Basis.IDENTITY, Vector3(0.0, lifted_local.y, 0.0)))
@@ -1066,8 +1066,8 @@ func _draw_creation_hover(gizmo, mesh_data: PBMeshData, face_index: int) -> void
 		gizmo.add_mesh(fill, _face_hover_fill_material)
 
 	# ARMED: one square under the cursor (on the hovered surface point).
-	var armed_drawing := (shape_creator != null and shape_creator.state == PBShapeCreator.State.ARMED) \
-		or (ngon_drawer != null and ngon_drawer.state == PBNgonDrawer.State.ARMED)
+	var armed_drawing := (shape_creator != null and shape_creator.state == PBShapeCreator.PBState.ARMED) \
+		or (ngon_drawer != null and ngon_drawer.state == PBNgonDrawer.PBState.ARMED)
 	if armed_drawing:
 		_creation_materials()
 		var node := gizmo.get_node_3d() as Node3D

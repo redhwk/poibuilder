@@ -1394,8 +1394,8 @@ func _process(delta: float) -> void:
 	# PBMesh gizmo — which needs a mesh in the scene. With none (fresh
 	# import, first shape not yet placed) the grid_view renders the square
 	# scenario-side instead; with a host, the gizmo drew it and this hides.
-	var armed := (shape_creator != null and shape_creator.state == PBShapeCreator.State.ARMED) \
-		or (ngon_drawer != null and ngon_drawer.state == PBNgonDrawer.State.ARMED)
+	var armed := (shape_creator != null and shape_creator.state == PBShapeCreator.PBState.ARMED) \
+		or (ngon_drawer != null and ngon_drawer.state == PBNgonDrawer.PBState.ARMED)
 	var hover_host: PBMesh = gizmo_plugin.creation_hover_node if gizmo_plugin != null else null
 	var host_drew := hover_host != null and is_instance_valid(hover_host)
 	grid_view.set_creation_cursor(
@@ -2678,13 +2678,13 @@ func _set_creation_hint(text: String) -> void:
 func _creation_input(camera: Camera3D, event: InputEvent) -> int:
 	if event is InputEventWithModifiers:
 		shape_creator.lock_direction = event.ctrl_pressed or Input.is_key_pressed(KEY_CTRL)
-		if shape_creator.state == PBShapeCreator.State.HEIGHT:
+		if shape_creator.state == PBShapeCreator.PBState.HEIGHT:
 			var alt_down: bool = event.alt_pressed or Input.is_key_pressed(KEY_ALT)
 			if shape_creator.show_height_plane != alt_down:
 				shape_creator.show_height_plane = alt_down
 				_refresh_preview()
 	elif event is InputEventKey:
-		if shape_creator.state == PBShapeCreator.State.HEIGHT:
+		if shape_creator.state == PBShapeCreator.PBState.HEIGHT:
 			var alt_down: bool = event.alt_pressed or Input.is_key_pressed(KEY_ALT)
 			if shape_creator.show_height_plane != alt_down:
 				shape_creator.show_height_plane = alt_down
@@ -2699,16 +2699,16 @@ func _creation_input(camera: Camera3D, event: InputEvent) -> int:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			match shape_creator.state:
-				PBShapeCreator.State.ARMED:
+				PBShapeCreator.PBState.ARMED:
 					if _creation_begin_from_surface(camera, event.position):
 						# Consume the press so the engine never starts a
 						# marquee / selection under the creation drag.
 						return AFTER_GUI_INPUT_STOP
 					return AFTER_GUI_INPUT_PASS
-				PBShapeCreator.State.HEIGHT, PBShapeCreator.State.OFFSET:
+				PBShapeCreator.PBState.HEIGHT, PBShapeCreator.PBState.OFFSET:
 					_creation_confirm()
 					return AFTER_GUI_INPUT_STOP
-				PBShapeCreator.State.PARAMS:
+				PBShapeCreator.PBState.PARAMS:
 					# Clicking elsewhere cancels the uncommitted modal changes
 					# (reverts to placement values), exactly like clicking Cancel.
 					if logger:
@@ -2716,17 +2716,17 @@ func _creation_input(camera: Camera3D, event: InputEvent) -> int:
 					_on_params_canceled()
 					return AFTER_GUI_INPUT_PASS
 		else:
-			if shape_creator.state == PBShapeCreator.State.BASE:
+			if shape_creator.state == PBShapeCreator.PBState.BASE:
 				_creation_end_base()
 				return AFTER_GUI_INPUT_STOP
 
 	if event is InputEventKey and event.pressed:
 		var k := event as InputEventKey
 		if not k.echo or _is_repeatable_grid_key(k):
-			if shape_creator.state != PBShapeCreator.State.PARAMS \
+			if shape_creator.state != PBShapeCreator.PBState.PARAMS \
 					and _handle_grid_action_key(k) == AFTER_GUI_INPUT_STOP:
 				return AFTER_GUI_INPUT_STOP
-		if shape_creator.state == PBShapeCreator.State.PARAMS:
+		if shape_creator.state == PBShapeCreator.PBState.PARAMS:
 			if event.keycode == KEY_ESCAPE:
 				_on_params_canceled()
 				return AFTER_GUI_INPUT_STOP
@@ -2882,7 +2882,7 @@ func _refresh_preview() -> void:
 		return
 	node.transform = shape_creator.placement_transform(data)
 	node.pb_mesh_data = data
-	if shape_creator.state == PBShapeCreator.State.BASE:
+	if shape_creator.state == PBShapeCreator.PBState.BASE:
 		node.mesh = null
 	# rebuild alone never redraws it.
 	node.update_gizmos()
@@ -2892,7 +2892,7 @@ func _creation_motion(camera: Camera3D, screen_pos: Vector2) -> void:
 	var ray_o: Vector3 = camera.project_ray_origin(screen_pos)
 	var ray_d: Vector3 = camera.project_ray_normal(screen_pos)
 	match shape_creator.state:
-		PBShapeCreator.State.BASE:
+		PBShapeCreator.PBState.BASE:
 			var hit := PBShapeCreator.ray_plane_intersect(ray_o, ray_d,
 				shape_creator.plane_point, shape_creator.plane_normal)
 			if hit != PBShapeCreator.RAY_MISS:
@@ -2901,14 +2901,14 @@ func _creation_motion(camera: Camera3D, screen_pos: Vector2) -> void:
 				_update_cursor_extents(screen_pos)
 			# No hover highlight while the base drag is out — the cursor is
 			# busy drawing the rect, not picking a face.
-		PBShapeCreator.State.HEIGHT, PBShapeCreator.State.OFFSET:
+		PBShapeCreator.PBState.HEIGHT, PBShapeCreator.PBState.OFFSET:
 			var ref := PBShapeCreator.height_reference_point(camera.global_position,
 				-camera.global_transform.basis.z, ray_o, ray_d, shape_creator.rect_center)
 			shape_creator.update_height_point(ref)
 			_refresh_preview()
 			_update_cursor_extents(screen_pos)
 			_clear_creation_hover()
-		PBShapeCreator.State.PARAMS:
+		PBShapeCreator.PBState.PARAMS:
 			_clear_creation_hover()
 		_:
 			_update_creation_hover(camera, screen_pos)
@@ -3006,14 +3006,14 @@ func _update_creation_hover(camera: Camera3D, screen_pos: Vector2) -> void:
 			best_face = -1
 
 	# Snap the hover vertex to the exact starting point creation will use when clicked:
-	if shape_creator != null and shape_creator.state == PBShapeCreator.State.ARMED:
+	if shape_creator != null and shape_creator.state == PBShapeCreator.PBState.ARMED:
 		best_point = shape_creator.snap_starting_point(best_point, best_normal)
-	elif ngon_drawer != null and ngon_drawer.is_active() and ngon_drawer.state == PBNgonDrawer.State.ARMED:
+	elif ngon_drawer != null and ngon_drawer.is_active() and ngon_drawer.state == PBNgonDrawer.PBState.ARMED:
 		best_point = ngon_drawer.snap_starting_point(best_point, best_normal, best_node, best_face)
-	elif sprite_placer != null and sprite_placer.is_active() and sprite_placer.state == PBSpritePlacer.State.ARMED:
+	elif sprite_placer != null and sprite_placer.is_active() and sprite_placer.state == PBSpritePlacer.PBState.ARMED:
 		if grid != null and grid.enabled and PBGrid.is_cardinal(best_normal):
 			best_point = grid.snap_point_masked(best_point, best_normal)
-	elif particle_placer != null and particle_placer.is_active() and particle_placer.state == PBParticlePlacer.State.ARMED:
+	elif particle_placer != null and particle_placer.is_active() and particle_placer.state == PBParticlePlacer.PBState.ARMED:
 		if grid != null and grid.enabled and PBGrid.is_cardinal(best_normal):
 			best_point = grid.snap_point_masked(best_point, best_normal)
 
@@ -3066,7 +3066,7 @@ func _creation_end_base() -> void:
 	# the surface (height 0) instead of popping in below it with a jump at
 	# the first mouse move.
 	_refresh_preview()
-	if shape_creator.state == PBShapeCreator.State.OFFSET:
+	if shape_creator.state == PBShapeCreator.PBState.OFFSET:
 		_set_creation_hint("move to lift it off the surface, then click to confirm")
 	else:
 		_set_creation_hint("move to size it, then click to confirm (Alt: height plane)")
@@ -3219,25 +3219,25 @@ func _update_cursor_extents(screen_pos: Vector2) -> void:
 		return
 	# Billboard sprite raise/scale: same floating readout as shape creation.
 	if sprite_placer != null and sprite_placer.is_active() \
-			and (sprite_placer.state == PBSpritePlacer.State.RAISE or sprite_placer.state == PBSpritePlacer.State.SCALE):
+			and (sprite_placer.state == PBSpritePlacer.PBState.RAISE or sprite_placer.state == PBSpritePlacer.PBState.SCALE):
 		var sp_text := sprite_placer.get_extents_readout()
 		if not sp_text.is_empty():
 			_show_cursor_extents(sp_text, screen_pos)
 			return
 	# Particle placement lift/tune: same treatment.
 	if particle_placer != null and particle_placer.is_active() \
-			and (particle_placer.state == PBParticlePlacer.State.RAISE or particle_placer.state == PBParticlePlacer.State.TUNE):
+			and (particle_placer.state == PBParticlePlacer.PBState.RAISE or particle_placer.state == PBParticlePlacer.PBState.TUNE):
 		var pp_text := particle_placer.get_extents_readout()
 		if not pp_text.is_empty():
 			_show_cursor_extents(pp_text, screen_pos)
 			return
 	# N-gon height drag: same treatment.
-	if ngon_drawer != null and ngon_drawer.is_active() and ngon_drawer.state == PBNgonDrawer.State.HEIGHT:
+	if ngon_drawer != null and ngon_drawer.is_active() and ngon_drawer.state == PBNgonDrawer.PBState.HEIGHT:
 		var ng_text := ngon_drawer.get_extents_readout()
 		if not ng_text.is_empty():
 			_show_cursor_extents(ng_text, screen_pos)
 			return
-	if shape_creator == null or not (shape_creator.state == PBShapeCreator.State.BASE or shape_creator.state == PBShapeCreator.State.HEIGHT or shape_creator.state == PBShapeCreator.State.OFFSET):
+	if shape_creator == null or not (shape_creator.state == PBShapeCreator.PBState.BASE or shape_creator.state == PBShapeCreator.PBState.HEIGHT or shape_creator.state == PBShapeCreator.PBState.OFFSET):
 		_cursor_extents_label.visible = false
 		return
 
@@ -3266,7 +3266,7 @@ func _show_cursor_extents(text: String, screen_pos: Vector2) -> void:
 func _forward_3d_draw_over_viewport(viewport_control: Control) -> void:
 	if _cursor_extents_label != null and _cursor_extents_label.is_inside_tree() and _cursor_extents_label.visible:
 		return
-	if shape_creator == null or not (shape_creator.state == PBShapeCreator.State.BASE or shape_creator.state == PBShapeCreator.State.HEIGHT or shape_creator.state == PBShapeCreator.State.OFFSET):
+	if shape_creator == null or not (shape_creator.state == PBShapeCreator.PBState.BASE or shape_creator.state == PBShapeCreator.PBState.HEIGHT or shape_creator.state == PBShapeCreator.PBState.OFFSET):
 		return
 	var text := shape_creator.get_cursor_extents_text()
 	if text.is_empty():
@@ -3343,13 +3343,13 @@ func _ngon_drawer_input(camera: Camera3D, event: InputEvent) -> int:
 		var ray_d: Vector3 = camera.project_ray_normal(event.position)
 
 		match ngon_drawer.state:
-			PBNgonDrawer.State.HEIGHT:
+			PBNgonDrawer.PBState.HEIGHT:
 				var ref := PBShapeCreator.height_reference_point(camera.global_position,
 					-camera.global_transform.basis.z, ray_o, ray_d, ngon_drawer.plane_point)
 				ngon_drawer.update_height_point(ref)
 				_refresh_ngon_preview()
 				_update_cursor_extents(event.position)
-			PBNgonDrawer.State.ARMED:
+			PBNgonDrawer.PBState.ARMED:
 				_update_creation_hover(camera, event.position)
 				var hit := _pick_creation_surface(camera, event.position)
 				if not hit.is_empty():
@@ -3374,7 +3374,7 @@ func _ngon_drawer_input(camera: Camera3D, event: InputEvent) -> int:
 						ngon_drawer.preview_node.update_gizmos()
 					elif best_m != null:
 						best_m.update_gizmos()
-			PBNgonDrawer.State.DRAWING, PBNgonDrawer.State.DRAGGING_VERT:
+			PBNgonDrawer.PBState.DRAWING, PBNgonDrawer.PBState.DRAGGING_VERT:
 				# Knife mode: check if cursor hits an adjacent face to switch to
 				if ngon_drawer.mode == PBNgonDrawer.Mode.KNIFE and ngon_drawer.target_mesh != null:
 					var tm: PBMesh = ngon_drawer.target_mesh
@@ -3399,11 +3399,11 @@ func _ngon_drawer_input(camera: Camera3D, event: InputEvent) -> int:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			match ngon_drawer.state:
-				PBNgonDrawer.State.ARMED:
+				PBNgonDrawer.PBState.ARMED:
 					if _ngon_drawer_begin_from_surface(camera, event.position):
 						return AFTER_GUI_INPUT_STOP
 					return AFTER_GUI_INPUT_PASS
-				PBNgonDrawer.State.DRAWING:
+				PBNgonDrawer.PBState.DRAWING:
 					if ngon_drawer.hovered_vert_idx >= 0:
 						if ngon_drawer.hovered_vert_idx == 0 and ngon_drawer.points.size() >= 3:
 							_on_ngon_drawer_complete()
@@ -3420,11 +3420,11 @@ func _ngon_drawer_input(camera: Camera3D, event: InputEvent) -> int:
 						elif editor.active_mesh != null:
 							editor.active_mesh.update_gizmos()
 						return AFTER_GUI_INPUT_STOP
-				PBNgonDrawer.State.HEIGHT:
+				PBNgonDrawer.PBState.HEIGHT:
 					_on_ngon_drawer_confirm_height()
 					return AFTER_GUI_INPUT_STOP
 		else:
-			if ngon_drawer.state == PBNgonDrawer.State.DRAGGING_VERT:
+			if ngon_drawer.state == PBNgonDrawer.PBState.DRAGGING_VERT:
 				ngon_drawer.end_drag_vert()
 				if ngon_drawer.preview_node != null:
 					ngon_drawer.preview_node.update_gizmos()
@@ -3435,10 +3435,10 @@ func _ngon_drawer_input(camera: Camera3D, event: InputEvent) -> int:
 	if event is InputEventKey and event.pressed:
 		var k := event as InputEventKey
 		if k.keycode == KEY_ENTER or k.keycode == KEY_KP_ENTER:
-			if ngon_drawer.state == PBNgonDrawer.State.DRAWING or ngon_drawer.state == PBNgonDrawer.State.DRAGGING_VERT:
+			if ngon_drawer.state == PBNgonDrawer.PBState.DRAWING or ngon_drawer.state == PBNgonDrawer.PBState.DRAGGING_VERT:
 				_on_ngon_drawer_complete()
 				return AFTER_GUI_INPUT_STOP
-			elif ngon_drawer.state == PBNgonDrawer.State.HEIGHT:
+			elif ngon_drawer.state == PBNgonDrawer.PBState.HEIGHT:
 				_on_ngon_drawer_confirm_height()
 				return AFTER_GUI_INPUT_STOP
 		elif k.keycode == KEY_ESCAPE:
@@ -3506,7 +3506,7 @@ func _refresh_ngon_preview() -> void:
 	var node := ngon_drawer.preview_node
 	if node == null:
 		return
-	if ngon_drawer.state == PBNgonDrawer.State.HEIGHT:
+	if ngon_drawer.state == PBNgonDrawer.PBState.HEIGHT:
 		var data := ngon_drawer.build_preview_data()
 		if data != null:
 			node.transform = Transform3D.IDENTITY
@@ -3669,7 +3669,7 @@ func _on_dock_mode_changed(new_mode: PBMaterialDock.DockMode) -> void:
 				sprite_placer.abort()
 			if particle_placer != null and particle_placer.is_active():
 				particle_placer.abort()
-			if shape_creator.is_active() and shape_creator.state == PBShapeCreator.State.ARMED:
+			if shape_creator.is_active() and shape_creator.state == PBShapeCreator.PBState.ARMED:
 				shape_creator.reset()
 				_set_creation_hint("")
 				_update_editing_context()
@@ -3681,7 +3681,7 @@ func _arm_shape_mode_shape() -> void:
 	if not _dock_is_shape_mode():
 		return
 	if shape_creator.is_active() and shape_creator.shape_id == _shape_mode_shape \
-			and shape_creator.state == PBShapeCreator.State.ARMED:
+			and shape_creator.state == PBShapeCreator.PBState.ARMED:
 		return
 	_on_shape_requested(_shape_mode_shape)
 
@@ -4109,19 +4109,19 @@ func _sprite_placer_input(camera: Camera3D, event: InputEvent) -> int:
 			var view_forward: Vector3 = -camera.global_transform.basis.z
 			if view_forward.dot(surface_hit["normal"]) > 0.0:
 				surface_hit["normal"] = -surface_hit["normal"]
-		if sprite_placer.state == PBSpritePlacer.State.ARMED:
+		if sprite_placer.state == PBSpritePlacer.PBState.ARMED:
 			if not surface_hit.is_empty():
 				_set_creation_hint("Sprite: click a surface to place the selected sprite (drag to pick a texture)")
 				_update_creation_hover(camera, event.position)
 			else:
 				_clear_creation_hover()
-		elif sprite_placer.state == PBSpritePlacer.State.TEXTURE_SELECT:
+		elif sprite_placer.state == PBSpritePlacer.PBState.TEXTURE_SELECT:
 			_clear_creation_hover()
 			_set_creation_hint("Sprite: scroll to select texture • release / click to confirm")
-		elif sprite_placer.state == PBSpritePlacer.State.RAISE:
+		elif sprite_placer.state == PBSpritePlacer.PBState.RAISE:
 			_clear_creation_hover()
 			_set_creation_hint("Sprite: mouse up/down to raise • click to lock angle")
-		elif sprite_placer.state == PBSpritePlacer.State.SCALE:
+		elif sprite_placer.state == PBSpritePlacer.PBState.SCALE:
 			_clear_creation_hover()
 			_set_creation_hint("Sprite: mouse left/right to scale • click to confirm placement")
 
@@ -4155,7 +4155,7 @@ func _particle_placer_input(camera: Camera3D, event: InputEvent) -> int:
 			var view_forward: Vector3 = -camera.global_transform.basis.z
 			if view_forward.dot(surface_hit["normal"]) > 0.0:
 				surface_hit["normal"] = -surface_hit["normal"]
-		if particle_placer.state == PBParticlePlacer.State.ARMED:
+		if particle_placer.state == PBParticlePlacer.PBState.ARMED:
 			if not surface_hit.is_empty():
 				_set_creation_hint(particle_placer.phase_hint())
 				_update_creation_hover(camera, event.position)
