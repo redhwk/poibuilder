@@ -70,11 +70,13 @@ var _last_mouse_pos: Vector2 = Vector2.ZERO
 var _last_mouse_camera: Camera3D = null
 ## Time of the last press seen in the viewport, for click-recency checks.
 var _last_press_msec: int = -10000
+## MeshInstance3D.mesh stashed while Poibuilderize nests under the scene root.
+## Keyed by instance id so undo can restore without writing scene metadata.
+var _poibuilderize_mesh_backup: Dictionary = {}
 
-## Invisible anchor used to locate the 3D editor's toolbar containers; added
-## to CONTAINER_SPATIAL_EDITOR_MENU, walked for the placement below, then
-## removed again.
+## Throwaway probe used only to locate Node3DEditor for the tool bridge.
 var _toolbar_anchor: Control = null
+var _toolbar_bottom_button: Button = null
 ## Live animated scrolling textures in editor viewport.
 var animate_scrolling_textures: bool = true:
 	set(val):
@@ -166,7 +168,8 @@ func _enter_tree():
 	# undo are all driven by the editor through the subgizmo API.
 	add_node_3d_gizmo_plugin(gizmo_plugin)
 
-	# Persistent toolbar row UNDER the 3D scene toolbar (not inside it)
+	# Persistent toolbar as a bottom panel (collapsible / floatable), same
+	# pattern as AssetPlacer and the UV Editor — not welded into the 3D stack.
 	toolbar = PBToolbar.new()
 	toolbar.editor = editor
 	toolbar.set_editing_active(false)
@@ -184,6 +187,8 @@ func _enter_tree():
 	toolbar.docs_requested.connect(_on_docs_requested)
 	toolbar.env_preset_requested.connect(_on_env_preset_requested)
 	toolbar.split_rows_toggled.connect(_on_toolbar_split_rows_toggled)
+	toolbar.placement_requested.connect(_on_toolbar_placement_requested)
+	toolbar.float_closed.connect(_on_toolbar_float_closed)
 	toolbar.vertex_snap_toggled.connect(func(on: bool):
 		gizmo_plugin.element_editor.vertex_snap_enabled = on
 		if editor.active_mesh != null:
@@ -208,7 +213,8 @@ func _enter_tree():
 				toolbar.set_rows_mode(int(ed_settings.get_setting("poibuilder/toolbar/rows_mode")))
 			elif ed_settings.has_setting("poibuilder/toolbar/two_rows"):
 				toolbar.set_two_rows(bool(ed_settings.get_setting("poibuilder/toolbar/two_rows")))
-	_add_toolbar_row_below_3d_toolbar()
+	_find_3d_editor()
+	_restore_toolbar_placement()
 	_export_dialog = PBExportDialog.new()
 	if Engine.is_editor_hint():
 		var base := EditorInterface.get_base_control()
@@ -337,10 +343,15 @@ func _exit_tree():
 
 	# Remove toolbar
 	if toolbar:
-		if is_instance_valid(toolbar) and toolbar.get_parent() != null:
-			toolbar.get_parent().remove_child(toolbar)
+		if is_instance_valid(toolbar):
+			if toolbar._is_floating and toolbar._floating_window != null:
+				toolbar._floating_window.remove_child(toolbar)
+				toolbar._floating_window.queue_free()
+			elif Engine.is_editor_hint():
+				_detach_toolbar_from_host()
 			toolbar.queue_free()
 		toolbar = null
+		_toolbar_bottom_button = null
 	if _toolbar_anchor:
 		if is_instance_valid(_toolbar_anchor) and _toolbar_anchor.get_parent() != null:
 			remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_anchor)
@@ -404,52 +415,87 @@ func _exit_tree():
 # ==============================================================================
 
 var _n3d_editor: Node = null
+var _toolbar_host: int = -1
+var _toolbar_dock_slot: int = EditorPlugin.DOCK_SLOT_LEFT_BL
+var _toolbar_return_host: int = PBToolbar.HOST_BOTTOM
+var _toolbar_return_slot: int = EditorPlugin.DOCK_SLOT_LEFT_BL
 
 func toolbar_has_3d_editor() -> bool:
 	return _n3d_editor != null and is_instance_valid(_n3d_editor)
 
-## Adds the toolbar as its own row below the 3D scene toolbar.
-##
-## The plugin API only offers a slot INSIDE the engine's toolbar flow, so a
-## throwaway anchor control is added there and walked to find the real
-## layout: anchor → context panel → HFlowContainer → toolbar MarginContainer
-## → layout container. In Godot 4.7 the Node3DEditor IS the layout VBox
-## (`VBoxContainer *vbc = this;` — get_class() still reports
-## "Node3DEditor", so class-name searches for a VBox miss it and must never
-## be used; one such search landed the row inside a hidden snap dialog).
-## Inserting our row into the margin's parent container as a sibling AFTER
-## the engine toolbar makes the engine's own VBox layout give us a
-## full-width row and push the viewports down, whatever the version.
-func _add_toolbar_row_below_3d_toolbar() -> void:
+## Locates Node3DEditor for the tool bridge. A throwaway probe is added to
+## the spatial-editor menu slot and walked upward, then removed. The toolbar
+## itself is no longer inserted into that VBox — that is what shoved the
+## Output / Debugger / Audio strip off short screens.
+func _find_3d_editor() -> void:
 	_toolbar_anchor = Control.new()
 	_toolbar_anchor.name = "PBToolbarAnchor"
 	add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_anchor)
-
-	var flow: Node = _find_ancestor_of_class(_toolbar_anchor, "HFlowContainer")
 	_n3d_editor = _find_ancestor_of_class(_toolbar_anchor, "Node3DEditor")
-	var layout: Container = null
-	if flow != null and flow.get_parent() is Container:
-		var margin: Container = flow.get_parent()
-		if margin.get_parent() is Container:
-			layout = margin.get_parent()
-	if layout == null or _n3d_editor == null:
-		logger.warn("plugin", "Could not locate the 3D editor toolbar layout — toolbar placed inside the scene toolbar")
-		add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, toolbar)
-		remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_anchor)
-		_toolbar_anchor.queue_free()
-		_toolbar_anchor = null
-		return
-
-	layout.add_child(toolbar)
-	var margin: Node = flow.get_parent()
-	layout.move_child(toolbar, mini(margin.get_index() + 1, layout.get_child_count() - 1))
-
-	# The anchor's job (locating the layout) is done; remove it so it does
-	# not leave an invisible entry in the context toolbar.
 	remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _toolbar_anchor)
 	_toolbar_anchor.queue_free()
 	_toolbar_anchor = null
-	logger.info("plugin", "Toolbar added as a row below the 3D scene toolbar")
+	if _n3d_editor == null:
+		logger.warn("plugin", "Could not locate the 3D editor — tool bridge unavailable")
+
+func _restore_toolbar_placement() -> void:
+	var host := PBToolbar.HOST_BOTTOM
+	var slot := EditorPlugin.DOCK_SLOT_LEFT_BL
+	if Engine.is_editor_hint():
+		var ed := EditorInterface.get_editor_settings()
+		if ed != null:
+			if ed.has_setting("poibuilder/toolbar/host"):
+				host = int(ed.get_setting("poibuilder/toolbar/host"))
+			if ed.has_setting("poibuilder/toolbar/dock_slot"):
+				slot = int(ed.get_setting("poibuilder/toolbar/dock_slot"))
+	_apply_toolbar_placement(host, slot)
+
+func _on_toolbar_placement_requested(host: int, slot: int) -> void:
+	_apply_toolbar_placement(host, slot)
+
+func _on_toolbar_float_closed() -> void:
+	_apply_toolbar_placement(_toolbar_return_host, _toolbar_return_slot)
+
+func _apply_toolbar_placement(host: int, slot: int) -> void:
+	if toolbar == null or not Engine.is_editor_hint():
+		return
+	if host == PBToolbar.HOST_FLOAT and _toolbar_host != PBToolbar.HOST_FLOAT:
+		_toolbar_return_host = _toolbar_host if _toolbar_host >= 0 else PBToolbar.HOST_BOTTOM
+		_toolbar_return_slot = _toolbar_dock_slot
+	_detach_toolbar_from_host()
+	match host:
+		PBToolbar.HOST_DOCK:
+			add_control_to_dock(slot, toolbar)
+			_toolbar_dock_slot = slot
+			_toolbar_host = PBToolbar.HOST_DOCK
+		PBToolbar.HOST_FLOAT:
+			toolbar.attach_floating_window()
+			_toolbar_host = PBToolbar.HOST_FLOAT
+		_:
+			_toolbar_bottom_button = add_control_to_bottom_panel(toolbar, "PoiBuilder")
+			make_bottom_panel_item_visible(toolbar)
+			_toolbar_host = PBToolbar.HOST_BOTTOM
+	_save_toolbar_placement()
+
+func _detach_toolbar_from_host() -> void:
+	if toolbar == null or not Engine.is_editor_hint():
+		return
+	match _toolbar_host:
+		PBToolbar.HOST_BOTTOM:
+			remove_control_from_bottom_panel(toolbar)
+			_toolbar_bottom_button = null
+		PBToolbar.HOST_DOCK:
+			remove_control_from_docks(toolbar)
+		PBToolbar.HOST_FLOAT:
+			toolbar.detach_floating_window()
+	_toolbar_host = -1
+
+func _save_toolbar_placement() -> void:
+	var ed := EditorInterface.get_editor_settings()
+	if ed == null:
+		return
+	ed.set_setting("poibuilder/toolbar/host", _toolbar_host)
+	ed.set_setting("poibuilder/toolbar/dock_slot", _toolbar_dock_slot)
 
 ## Parents `control` to the first 3D editor viewport so it floats over the
 ## scene. The Node3DEditorViewport is a plain Control (no container sort), so
@@ -1646,10 +1692,13 @@ func _on_display_reset() -> void:
 	_on_display_setting_changed(&"hover_opacity", 0.25)
 	tool_overlay.sync_display_settings(0.7, 0.7, 0.25, 0.25)
 
-## Focuses the Material & UV dock.
+## Focuses the Material & UV dock. Re-adds it if the user closed the tab
+## or a floating dock window.
 func focus_material_dock() -> void:
-	if material_dock == null:
+	if material_dock == null or not is_instance_valid(material_dock):
 		return
+	if Engine.is_editor_hint() and not _material_dock_is_on_screen():
+		_restore_material_dock()
 	var editor_dock := material_dock.get_parent() as Control
 	if editor_dock != null:
 		editor_dock.show()
@@ -1662,6 +1711,27 @@ func focus_material_dock() -> void:
 					tb.call("grab_focus", true)
 	material_dock.show()
 	material_dock.sync_selection()
+
+func _material_dock_is_on_screen() -> bool:
+	var n: Node = material_dock
+	if n == null or n.get_parent() == null:
+		return false
+	while n != null:
+		if n is Window:
+			return (n as Window).visible
+		if n is CanvasItem and not (n as CanvasItem).visible:
+			return false
+		n = n.get_parent()
+	return true
+
+func _restore_material_dock() -> void:
+	var parent := material_dock.get_parent()
+	if parent is Window:
+		parent.remove_child(material_dock)
+		parent.queue_free()
+	elif parent != null:
+		remove_control_from_docks(material_dock)
+	add_control_to_dock(DOCK_SLOT_RIGHT_UL, material_dock)
 
 ## Focuses or opens the UV Editor bottom dock panel.
 func focus_uv_editor() -> void:
@@ -2345,28 +2415,18 @@ func _perform_poibuilderize() -> void:
 			pb = PBObjectOps.poibuilderize_csg(n as CSGShape3D)
 
 		if pb != null:
-			var parent := n.get_parent()
-			if parent == null and scene_root != null:
-				parent = scene_root
-			if parent != null:
-				pb.transform = n.transform
-				created_nodes.append(pb)
-				# The whole swap runs through the undo do-methods: adding the
-				# PBMesh directly here as well would make the committed
-				# add_child a no-op error ("already has a parent") and leave
-				# the action's bookkeeping out of sync with the tree.
-				if undo_mgr != null:
-					undo_mgr.add_do_reference(pb)
-					undo_mgr.add_undo_reference(n)
-					undo_mgr.add_do_method(parent, "add_child", pb)
-					undo_mgr.add_do_method(self, "_own_node", pb)
-					undo_mgr.add_do_method(parent, "remove_child", n)
-					undo_mgr.add_undo_method(parent, "add_child", n)
-					undo_mgr.add_undo_method(parent, "remove_child", pb)
-				else:
-					parent.add_child(pb)
-					pb.owner = scene_root if scene_root != null else parent
-					parent.remove_child(n)
+			created_nodes.append(pb)
+			# The whole swap runs through the undo do-methods: adding the
+			# PBMesh directly here as well would make the committed
+			# add_child a no-op error ("already has a parent") and leave
+			# the action's bookkeeping out of sync with the tree.
+			if undo_mgr != null:
+				undo_mgr.add_do_reference(pb)
+				undo_mgr.add_undo_reference(n)
+				undo_mgr.add_do_method(self, "_poibuilderize_insert", pb, n)
+				undo_mgr.add_undo_method(self, "_poibuilderize_revert", pb, n)
+			else:
+				_poibuilderize_insert(pb, n)
 
 	if undo_mgr != null:
 		undo_mgr.commit_action()
@@ -4687,15 +4747,79 @@ func _attach_detached(node: Node, parent: Node) -> void:
 	if parent == null or not is_instance_valid(parent):
 		return
 	if node.get_parent() == parent:
+		_own_node(node)
 		return  # already attached (creation finalize commits against a live preview)
 	parent.add_child(node)
-	node.owner = get_editor_interface().get_edited_scene_root()
+	_own_node(node)
 
 ## Undo "do" half for creation: the preview node is already in the tree when
 ## the action commits — only ownership is missing.
 func _own_node(node: Node) -> void:
-	if node != null and is_instance_valid(node):
-		node.owner = get_editor_interface().get_edited_scene_root()
+	if node == null or not is_instance_valid(node):
+		return
+	var scene_root := get_editor_interface().get_edited_scene_root()
+	if scene_root == null or node == scene_root:
+		return
+	# Godot rejects owner assignment unless the owner is an ancestor in the
+	# live tree. Poibuilderize used to hit this when converting the edited
+	# scene root: the new node was parented beside that root, not under it.
+	if not node.is_inside_tree() or not scene_root.is_ancestor_of(node):
+		return
+	node.owner = scene_root
+
+## Insert a poibuilderized mesh. A child of the edited scene can be swapped
+## in place. The edited scene root cannot: its parent is the editor viewport,
+## so a sibling there cannot take the scene root as owner.
+func _poibuilderize_insert(pb: Node, original: Node) -> void:
+	if pb == null or original == null or not is_instance_valid(pb) or not is_instance_valid(original):
+		return
+	if pb.get_parent() != null:
+		return
+	var scene_root := get_editor_interface().get_edited_scene_root()
+	var parent := original.get_parent()
+	var parent_in_edited_scene := scene_root != null and parent != null \
+		and (parent == scene_root or scene_root.is_ancestor_of(parent))
+	if original == scene_root or not parent_in_edited_scene:
+		pb.transform = Transform3D.IDENTITY
+		if original is GeometryInstance3D and pb is GeometryInstance3D:
+			(pb as GeometryInstance3D).gi_mode = (original as GeometryInstance3D).gi_mode
+			(pb as GeometryInstance3D).cast_shadow = (original as GeometryInstance3D).cast_shadow
+		original.add_child(pb)
+		_own_node(pb)
+		if original is MeshInstance3D:
+			_poibuilderize_mesh_backup[original.get_instance_id()] = (original as MeshInstance3D).mesh
+			(original as MeshInstance3D).mesh = null
+		if logger:
+			logger.info("plugin", "Poibuilderize: '%s' is the scene root, so the editable mesh was added as a child" % original.name)
+		return
+	pb.transform = original.transform
+	var index := original.get_index()
+	parent.add_child(pb)
+	parent.move_child(pb, index)
+	_own_node(pb)
+	parent.remove_child(original)
+
+func _poibuilderize_revert(pb: Node, original: Node) -> void:
+	if pb == null or not is_instance_valid(pb):
+		return
+	var parent := pb.get_parent()
+	if parent == null:
+		return
+	if original != null and is_instance_valid(original) and parent == original:
+		parent.remove_child(pb)
+		if original is MeshInstance3D:
+			var id := original.get_instance_id()
+			if _poibuilderize_mesh_backup.has(id):
+				(original as MeshInstance3D).mesh = _poibuilderize_mesh_backup[id]
+				_poibuilderize_mesh_backup.erase(id)
+		return
+	if original != null and is_instance_valid(original):
+		var index := pb.get_index()
+		parent.add_child(original)
+		parent.move_child(original, index)
+		if original.owner == null:
+			_own_node(original)
+	parent.remove_child(pb)
 
 ## Undo of detach: remove the node WITHOUT freeing it — the undo history's
 ## do-reference keeps it alive so redo can re-attach it.

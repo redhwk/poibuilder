@@ -143,7 +143,9 @@ var _syncing: bool = false
 
 func _init() -> void:
 	name = "Material & UV"
-	custom_minimum_size = Vector2(250, 320)
+	# Do not floor the editor's min height. At 125% scale a 320px dock plus
+	# chrome shoves Output / Debugger / Audio off short screens.
+	custom_minimum_size = Vector2(120, 60)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_load_default_material_setting()
@@ -273,13 +275,20 @@ func _build_ui() -> void:
 	for c in get_children():
 		c.queue_free()
 
+	_scroll = _ShrinkScroll.new()
+	_scroll.name = "DockScroll"
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	add_child(_scroll)
+
 	var root_vbox := VBoxContainer.new()
 	root_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(root_vbox)
+	_scroll.add_child(root_vbox)
 
-	# 1. Mode Selector Segmented Row
-	var mode_row := HBoxContainer.new()
+	# 1. Mode Selector — wraps so a narrow dock can shrink.
+	var mode_row := HFlowContainer.new()
 	mode_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	_btn_mode_mat = Button.new()
@@ -361,7 +370,7 @@ func _build_ui() -> void:
 
 	# Material Cards Container
 	var mat_scroll := ScrollContainer.new()
-	mat_scroll.custom_minimum_size = Vector2(0, 130)
+	mat_scroll.custom_minimum_size = Vector2(0, 64)
 	mat_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	mat_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root_vbox.add_child(mat_scroll)
@@ -1477,6 +1486,36 @@ func _append_material_once(mat: Material) -> bool:
 	_project_materials.append(mat)
 	return true
 
+func _should_skip_material_scan_dir(full_path: String, name_str: String) -> bool:
+	if name_str == "addons" or name_str == ".godot":
+		return true
+	return FileAccess.file_exists(full_path.path_join("project.godot"))
+
+func _try_load_scanned_material(path: String) -> Material:
+	if not _tres_declares_material(path):
+		return null
+	if not ResourceLoader.exists(path):
+		return null
+	var res = ResourceLoader.load(path, "Material")
+	if res is Material:
+		return res
+	return null
+
+func _tres_declares_material(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	var head := f.get_buffer(mini(2048, int(f.get_length()))).get_string_from_utf8()
+	f.close()
+	for type_name in [
+		"StandardMaterial3D", "ORMMaterial3D", "ShaderMaterial",
+		"CanvasItemMaterial", "FogMaterial", "ParticleProcessMaterial",
+		"PanoramaSkyMaterial", "ProceduralSkyMaterial", "PhysicalSkyMaterial"
+	]:
+		if head.contains("type=\"%s\"" % type_name):
+			return true
+	return path.get_extension().to_lower() == "material"
+
 func _scan_dir_for_materials(dir_path: String, depth: int = 0) -> void:
 	if depth > 3 or _project_materials.size() > 60:
 		return
@@ -1486,17 +1525,17 @@ func _scan_dir_for_materials(dir_path: String, depth: int = 0) -> void:
 	d.list_dir_begin()
 	var name_str := d.get_next()
 	while name_str != "":
-		if not name_str.begins_with(".") and not name_str.begins_with(".godot"):
+		if not name_str.begins_with("."):
 			var full_path := dir_path.path_join(name_str)
 			if d.current_is_dir():
-				_scan_dir_for_materials(full_path, depth + 1)
+				if not _should_skip_material_scan_dir(full_path, name_str):
+					_scan_dir_for_materials(full_path, depth + 1)
 			else:
 				var ext := name_str.get_extension().to_lower()
 				if ext == "tres" or ext == "material":
-					if ResourceLoader.exists(full_path):
-						var res = ResourceLoader.load(full_path)
-						if res is Material:
-							_append_material_once(res)
+					var mat := _try_load_scanned_material(full_path)
+					if mat != null:
+						_append_material_once(mat)
 				elif ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "webp":
 					# One card per texture NAME: a project copy of a bundled
 					# texture must not show twice in the palette.
@@ -2190,3 +2229,8 @@ class PBSpriteDropBox extends PanelContainer:
 							if mat is Material:
 								dock._select_sprite_material(mat)
 								return
+
+## Reports no content-driven min size so the right dock can shrink; content scrolls.
+class _ShrinkScroll extends ScrollContainer:
+	func _get_minimum_size() -> Vector2:
+		return Vector2.ZERO

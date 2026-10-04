@@ -1,8 +1,8 @@
-## PBToolbar — PoiBuilder's persistent toolbar row.
+## PBToolbar — PoiBuilder's persistent tool strip.
 ##
-## Lives as its own full-width row directly BELOW the 3D scene toolbar (not
-## inside it) and stays visible at all times. When no PBMesh is selected the
-## context buttons are disabled but the row remains.
+## Lives as a Godot bottom panel (collapsible tab next to Output / Debugger)
+## and can pop out into a floating window. When no PBMesh is selected the
+## context buttons are disabled but the strip remains.
 ##
 ## Groups (icon-driven; simple SVG glyphs, see icons/):
 ## - Tool (Move/Rotate/Scale): the plugin's OWN transform tool. While editing
@@ -71,6 +71,10 @@ signal env_preset_requested(preset_name: String)
 ## Emitted when the user toggles the split-rows layout button.
 signal split_rows_toggled(two_rows: bool)
 
+## Plugin owns placement. host: 0 bottom, 1 editor dock, 2 floating window.
+signal placement_requested(host: int, slot: int)
+signal float_closed
+
 ## Emitted when the user toggles the Lit / Cast Shadows object-state buttons
 ## (row 3). They apply to the whole current scene selection.
 signal object_lit_toggled(pressed: bool)
@@ -79,6 +83,10 @@ signal object_shadow_toggled(pressed: bool)
 # ==============================================================================
 
 const ICON_DIR := "res://addons/poibuilder/icons/"
+
+const HOST_BOTTOM := 0
+const HOST_DOCK := 1
+const HOST_FLOAT := 2
 
 # ==============================================================================
 # Internal UI & Layout
@@ -94,10 +102,10 @@ enum RowsMode {
 const AUTO_SPLIT_THRESHOLD := 1050.0
 
 var rows_mode: RowsMode = RowsMode.TWO_ROWS
-var _row1: HBoxContainer
-var _row2: HBoxContainer
-var _row3: HBoxContainer
-var _row4: HBoxContainer
+var _row1: HFlowContainer
+var _row2: HFlowContainer
+var _row3: HFlowContainer
+var _row4: HFlowContainer
 var _two_rows: bool = true
 ## Rows 3 & 4 (Extended Tools) ship VISIBLE: a fresh import must show the
 ## whole toolset (the user can still fold them with the Split Rows toggle,
@@ -135,6 +143,9 @@ var _btn_settings: Button
 var _btn_env: MenuButton
 var _btn_export_more: Button
 var _btn_docs: Button
+var _btn_pop_out: MenuButton
+var _floating_window: Window = null
+var _is_floating: bool = false
 var _btn_grid_panel: Button
 var _lbl_grid_state: Label
 var _btn_obj_lit: Button
@@ -170,8 +181,9 @@ var editor: PBEditor = null:
 # ==============================================================================
 
 func _init() -> void:
-	name = "PBToolbar"
+	name = "PoiBuilder"
 	size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
+	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	add_theme_constant_override("separation", 2)
 	_build_ui()
 
@@ -180,30 +192,18 @@ func _notification(what: int) -> void:
 		_check_auto_split()
 
 func _build_ui() -> void:
-	_row1 = HBoxContainer.new()
-	_row1.name = "Row1"
-	_row1.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
-	_row1.add_theme_constant_override("separation", 4)
+	_row1 = _make_flow_row("Row1")
 	add_child(_row1)
 
-	_row2 = HBoxContainer.new()
-	_row2.name = "Row2"
-	_row2.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
-	_row2.add_theme_constant_override("separation", 4)
+	_row2 = _make_flow_row("Row2")
 	_row2.visible = true
 	add_child(_row2)
 
-	_row3 = HBoxContainer.new()
-	_row3.name = "Row3"
-	_row3.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
-	_row3.add_theme_constant_override("separation", 4)
+	_row3 = _make_flow_row("Row3")
 	_row3.visible = true
 	add_child(_row3)
 
-	_row4 = HBoxContainer.new()
-	_row4.name = "Row4"
-	_row4.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
-	_row4.add_theme_constant_override("separation", 4)
+	_row4 = _make_flow_row("Row4")
 	_row4.visible = true
 	add_child(_row4)
 
@@ -509,10 +509,54 @@ func _build_ui() -> void:
 	_btn_docs.tooltip_text = "Docs: Open the bundled PoiBuilder documentation"
 	_btn_docs.pressed.connect(func(): docs_requested.emit())
 
+	_btn_pop_out = MenuButton.new()
+	_btn_pop_out.name = "PlacementButton"
+	_btn_pop_out.icon = _load_icon("icon_uv_pop_out.svg")
+	if _btn_pop_out.icon == null:
+		_btn_pop_out.text = "Dock"
+	_btn_pop_out.flat = true
+	_btn_pop_out.focus_mode = Control.FOCUS_NONE
+	_btn_pop_out.tooltip_text = "Dock Position: bottom panel, any editor dock slot, or a floating window"
+	_build_placement_menu()
+
 	_update_row_layout()
+
+func _make_flow_row(row_name: String) -> HFlowContainer:
+	var row := HFlowContainer.new()
+	row.name = row_name
+	row.size_flags_horizontal = Control.SIZE_EXPAND | Control.SIZE_FILL
+	row.add_theme_constant_override("h_separation", 4)
+	row.add_theme_constant_override("v_separation", 4)
+	return row
 
 func _make_sep() -> VSeparator:
 	return VSeparator.new()
+
+func _build_placement_menu() -> void:
+	var popup := _btn_pop_out.get_popup()
+	popup.clear()
+	popup.add_item("Bottom Panel", 0)
+	popup.add_separator()
+	popup.add_item("Left Upper", 10)
+	popup.add_item("Left Lower", 11)
+	popup.add_item("Left Upper (2nd column)", 12)
+	popup.add_item("Left Lower (2nd column)", 13)
+	popup.add_item("Right Upper", 14)
+	popup.add_item("Right Lower", 15)
+	popup.add_item("Right Upper (2nd column)", 16)
+	popup.add_item("Right Lower (2nd column)", 17)
+	popup.add_separator()
+	popup.add_item("Floating Window", 1)
+	if not popup.id_pressed.is_connected(_on_placement_id_pressed):
+		popup.id_pressed.connect(_on_placement_id_pressed)
+
+func _on_placement_id_pressed(id: int) -> void:
+	if id == 0:
+		placement_requested.emit(HOST_BOTTOM, 0)
+	elif id == 1:
+		placement_requested.emit(HOST_FLOAT, 0)
+	elif id >= 10 and id <= 17:
+		placement_requested.emit(HOST_DOCK, id - 10)
 
 ## Sets layout mode: AUTO (0), SINGLE (1), or TWO_ROWS (2).
 func set_rows_mode(mode: int) -> void:
@@ -583,7 +627,7 @@ func _update_row_layout() -> void:
 	var grp_shapes: Array[Control] = [_sep_shapes, _btn_new_shape, _btn_ngon, _btn_edit_params]
 	var grp_docks: Array[Control] = [
 		_sep_docks, _btn_materials, _btn_uv_editor, _btn_overlay, _btn_recover_overlay,
-		_btn_settings, _sep_export, _btn_export_more, _btn_docs
+		_btn_settings, _sep_export, _btn_export_more, _btn_docs, _btn_pop_out
 	]
 	_row2.add_child(_btn_object)
 	_row2.add_child(_btn_vertex)
@@ -883,9 +927,9 @@ func _on_shape_menu_pressed(id: int) -> void:
 # Editing Context
 # ==============================================================================
 
-## The toolbar row is persistent: it is ALWAYS visible. Context buttons are
-## enabled whenever a PBMesh is selected — including OBJECT mode (Object is
-## its own mode; switching back to an element mode must always be possible).
+## Context buttons are enabled whenever a PBMesh is selected — including
+## OBJECT mode (Object is its own mode; switching back to an element mode
+## must always be possible).
 func set_editing_active(active: bool) -> void:
 	for btn: Button in [_btn_move, _btn_rotate, _btn_scale, _btn_space,
 			_btn_object, _btn_vertex, _btn_edge, _btn_face, _btn_texture, _btn_uv_editor]:
@@ -939,3 +983,48 @@ func set_env_preset(preset_name: String) -> void:
 		_btn_env.text = p.get("label", preset_name.capitalize()) + " ▾"
 func env_button() -> MenuButton:
 	return _btn_env
+
+# ==============================================================================
+# Pop-out Window
+# ==============================================================================
+
+## Called by the plugin after detaching from a panel/dock.
+func attach_floating_window() -> void:
+	if _is_floating:
+		return
+	_is_floating = true
+	_floating_window = Window.new()
+	_floating_window.name = "PoiBuilder_Toolbar_Window"
+	_floating_window.title = "PoiBuilder"
+	_floating_window.size = Vector2i(1100, 200)
+	_floating_window.min_size = Vector2i(480, 80)
+	_floating_window.wrap_controls = true
+	_floating_window.exclusive = false
+	_floating_window.transient = true
+	_floating_window.close_requested.connect(func(): float_closed.emit())
+
+	if get_parent() != null:
+		get_parent().remove_child(self)
+	_floating_window.add_child(self)
+	visible = true
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_floating_window.size_changed.connect(func():
+		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT))
+
+	var base_control := EditorInterface.get_base_control() if Engine.is_editor_hint() else null
+	if base_control != null:
+		base_control.get_window().add_child(_floating_window)
+	else:
+		get_tree().root.add_child(_floating_window)
+	_floating_window.popup_centered()
+
+## Called by the plugin before attaching to a panel/dock.
+func detach_floating_window() -> void:
+	if not _is_floating:
+		return
+	_is_floating = false
+	if _floating_window != null:
+		if get_parent() == _floating_window:
+			_floating_window.remove_child(self)
+		_floating_window.queue_free()
+		_floating_window = null

@@ -129,7 +129,7 @@ func _init() -> void:
 	name = "PBUvEditorPanel"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	custom_minimum_size = Vector2(300, 200)
+	custom_minimum_size = Vector2(300, 80)
 	_build_ui()
 
 func _ready() -> void:
