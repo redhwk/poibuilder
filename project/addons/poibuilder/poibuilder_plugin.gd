@@ -184,6 +184,7 @@ func _enter_tree():
 	toolbar.uv_editor_requested.connect(focus_uv_editor)
 	toolbar.settings_panel_toggled.connect(_on_settings_panel_toggled)
 	toolbar.export_requested.connect(_on_export_requested)
+	toolbar.bake_requested.connect(_on_bake_requested)
 	toolbar.docs_requested.connect(_on_docs_requested)
 	toolbar.env_preset_requested.connect(_on_env_preset_requested)
 	toolbar.split_rows_toggled.connect(_on_toolbar_split_rows_toggled)
@@ -272,11 +273,13 @@ func _enter_tree():
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, material_dock)
 	_setup_ideal_dock_layout.call_deferred()
 	# Dedicated 2D UV Editor Panel (Bottom dock)
+	_purge_stale_uv_editor_hosts()
 	uv_editor_panel = PBUvEditorPanel.new()
 	uv_editor_panel.editor = editor
 	uv_editor_panel.plugin = self
 	if Engine.is_editor_hint():
 		_uv_bottom_button = add_control_to_bottom_panel(uv_editor_panel, "UV Editor")
+		_purge_stale_uv_editor_buttons(_uv_bottom_button)
 	uv_editor_panel.pop_out_toggled.connect(_on_uv_pop_out_toggled)
 	# Half-size manipulator gizmos by default (the engine default of 80px is
 	# huge next to PoiBuilder's element work). Respect user customization:
@@ -376,14 +379,22 @@ func _exit_tree():
 		remove_control_from_docks(material_dock)
 		if is_instance_valid(material_dock):
 			material_dock.queue_free()
-	# Remove UV editor panel
-	if uv_editor_panel != null:
-		if not uv_editor_panel._is_floating and Engine.is_editor_hint():
+	# Remove UV editor panel (floating window first, then the bottom-panel item).
+	# Do not call set_floating(false) here — that would re-add a bottom tab.
+	if uv_editor_panel != null and is_instance_valid(uv_editor_panel):
+		if uv_editor_panel._floating_window != null and is_instance_valid(uv_editor_panel._floating_window):
+			uv_editor_panel._floating_window.remove_child(uv_editor_panel)
+			uv_editor_panel._floating_window.queue_free()
+			uv_editor_panel._floating_window = null
+			uv_editor_panel._is_floating = false
+		elif Engine.is_editor_hint():
 			remove_control_from_bottom_panel(uv_editor_panel)
 		if is_instance_valid(uv_editor_panel):
 			uv_editor_panel.queue_free()
-		uv_editor_panel = null
-		_uv_bottom_button = null
+	uv_editor_panel = null
+	_uv_bottom_button = null
+	_purge_stale_uv_editor_hosts()
+	_purge_stale_uv_editor_buttons(null)
 	# Remove export dialog
 	if _export_dialog != null:
 		if is_instance_valid(_export_dialog) and _export_dialog.get_parent() != null:
@@ -1615,6 +1626,118 @@ func _on_export_requested() -> void:
 		scene = get_tree().root
 	_export_dialog.open_dialog(scene)
 
+func _on_bake_requested(mode: int) -> void:
+	_perform_bake_to_scene(mode as PBSceneBaker.BakeMode)
+
+## Bakes every selected PBMesh into plain MeshInstance3D geometry beside it,
+## each with its collision as an owned StaticBody3D child, and HIDES the source
+## rather than freeing it: the PBMeshData is the only editable copy of the
+## geometry, so a delete would be the one unrecoverable step in an otherwise
+## reversible pipeline.
+func _perform_bake_to_scene(mode: PBSceneBaker.BakeMode) -> void:
+	var ei := get_editor_interface()
+	var scene_root: Node = ei.get_edited_scene_root() if ei != null else null
+
+	var targets: Array[PBMesh] = []
+	if ei != null and ei.get_selection() != null:
+		for n in ei.get_selection().get_selected_nodes():
+			if n is PBMesh and (n as PBMesh).pb_mesh_data != null:
+				targets.append(n as PBMesh)
+	if targets.is_empty() and editor.active_mesh != null:
+		targets.append(editor.active_mesh)
+	if targets.is_empty():
+		if logger:
+			logger.warn("plugin", "Bake: select a PBMesh first")
+		return
+
+	var undo := get_undo_redo()
+	if undo != null:
+		# Scene-history context (see the CSG action above).
+		undo.create_action("Bake to MeshInstance3D", UndoRedo.MERGE_DISABLE,
+			scene_root if scene_root != null else targets[0])
+
+	var baked_nodes: Array[Node] = []
+	for pb in targets:
+		# A PBMesh that IS the edited scene root has no sibling slot (its parent
+		# is the editor viewport, which cannot own scene nodes), so the bake
+		# nests under it. Hiding the source would then hide the bake along with
+		# it — Node3D visibility is inherited — so that source stays visible.
+		var nest_under_source: bool = pb == scene_root
+		var parent: Node = pb if nest_under_source else pb.get_parent()
+		if parent == null:
+			continue
+		var nodes := PBSceneBaker.build_baked_nodes(pb, mode, scene_root)
+		if nodes.is_empty():
+			continue
+		for mi in nodes:
+			baked_nodes.append(mi)
+			if nest_under_source:
+				mi.transform = Transform3D.IDENTITY
+			if undo != null:
+				undo.add_do_reference(mi)
+				undo.add_do_method(self, "_attach_baked_node", mi, parent, pb)
+				undo.add_undo_method(self, "_detach_node", mi)
+			else:
+				_attach_baked_node(mi, parent, pb)
+		# The bake now carries its own StaticBody3D, so the source's generated
+		# collider has to stand down: two identical shapes in the same spot
+		# make bodies jitter and report every raycast hit twice.
+		if pb.collider_type != PBMesh.ColliderType.OFF:
+			if undo != null:
+				undo.add_do_property(pb, "collider_type", PBMesh.ColliderType.OFF)
+				undo.add_undo_property(pb, "collider_type", pb.collider_type)
+			else:
+				pb.collider_type = PBMesh.ColliderType.OFF
+
+		if nest_under_source:
+			if logger:
+				logger.warn("plugin", "Bake: '%s' is the scene root, so the bake was nested inside it and the source left visible (hiding the root would hide the bake too)" % pb.name)
+		elif undo != null:
+			undo.add_do_property(pb, "visible", false)
+			undo.add_undo_property(pb, "visible", pb.visible)
+		else:
+			pb.visible = false
+
+	if undo != null:
+		undo.commit_action()
+
+	if baked_nodes.is_empty():
+		if logger:
+			logger.warn("plugin", "Bake produced no geometry")
+		return
+
+	if ei != null and ei.get_selection() != null:
+		ei.get_selection().clear()
+		for mi in baked_nodes:
+			ei.get_selection().add_node(mi)
+	if logger:
+		var with_collision := 0
+		for mi in baked_nodes:
+			if mi.get_node_or_null(NodePath(PBMesh.COLLIDER_BODY_NAME)) != null:
+				with_collision += 1
+		logger.info("plugin", "Baked %d PBMesh(es) to %d MeshInstance3D node(s) (%s), %d with collision" % [
+			targets.size(), baked_nodes.size(), PBSceneBaker.mode_label(mode), with_collision])
+
+## Undo "do" half of a scene bake: park the baked mesh directly after its
+## source so the Scene dock shows the pair together.
+func _attach_baked_node(node: Node, parent: Node, after: Node) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	if parent == null or not is_instance_valid(parent) or node.get_parent() != null:
+		return
+	parent.add_child(node)
+	if after != null and is_instance_valid(after) and after.get_parent() == parent:
+		parent.move_child(node, after.get_index() + 1)
+	# Recursive: the baked collider rides along as a child, and an unowned node
+	# renders in the viewport but is absent from the Scene dock AND from the
+	# saved scene — the collision would vanish on reload.
+	_own_node_recursive(node)
+
+func _own_node_recursive(node: Node) -> void:
+	_own_node(node)
+	for child in node.get_children():
+		_own_node_recursive(child)
+
 func _on_docs_requested() -> void:
 	var script_res := get_script() as Script
 	var plugin_dir := ""
@@ -1747,14 +1870,80 @@ func focus_uv_editor() -> void:
 	_sync_uv_editor_selection()
 
 func _on_uv_pop_out_toggled(floating: bool) -> void:
-	if not Engine.is_editor_hint():
+	if not Engine.is_editor_hint() or uv_editor_panel == null:
 		return
 	if floating:
 		remove_control_from_bottom_panel(uv_editor_panel)
 		_uv_bottom_button = null
 	else:
+		_purge_stale_uv_editor_hosts()
 		_uv_bottom_button = add_control_to_bottom_panel(uv_editor_panel, "UV Editor")
+		_purge_stale_uv_editor_buttons(_uv_bottom_button)
 		make_bottom_panel_item_visible(uv_editor_panel)
+
+## Drops leftover UV Editor hosts from a previous plugin instance (script
+## reload / enable without a clean _exit_tree). Godot keeps the old bottom-panel
+## tab when the control is reparented or the plugin is replaced.
+func _purge_stale_uv_editor_hosts() -> void:
+	if not Engine.is_editor_hint():
+		return
+	var ei := get_editor_interface()
+	if ei == null:
+		return
+	var base := ei.get_base_control()
+	if base == null:
+		return
+	var stale: Array[Node] = []
+	_collect_named_nodes(base, "PBUvEditorPanel", stale)
+	_collect_named_nodes(base, "PoiBuilder_UVEditor_Window", stale)
+	for n in stale:
+		if n == uv_editor_panel:
+			continue
+		if n is Control:
+			remove_control_from_bottom_panel(n)
+		if is_instance_valid(n) and n.get_parent() != null:
+			n.get_parent().remove_child(n)
+		if is_instance_valid(n):
+			n.queue_free()
+
+func _purge_stale_uv_editor_buttons(keep: Button) -> void:
+	if not Engine.is_editor_hint():
+		return
+	var ei := get_editor_interface()
+	if ei == null:
+		return
+	var base := ei.get_base_control()
+	if base == null:
+		return
+	var buttons: Array[Node] = []
+	_collect_bottom_panel_buttons_named(base, "UV Editor", buttons)
+	for n in buttons:
+		if n == keep or not is_instance_valid(n):
+			continue
+		n.queue_free()
+
+func _collect_named_nodes(root: Node, node_name: String, out: Array[Node]) -> void:
+	if root.name == node_name:
+		out.append(root)
+	for child in root.get_children():
+		_collect_named_nodes(child, node_name, out)
+
+func _collect_bottom_panel_buttons_named(root: Node, title: String, out: Array[Node]) -> void:
+	if root is Button and (root as Button).text == title and _looks_like_bottom_panel_button(root):
+		out.append(root)
+	for child in root.get_children():
+		_collect_bottom_panel_buttons_named(child, title, out)
+
+func _looks_like_bottom_panel_button(btn: Node) -> bool:
+	var parent := btn.get_parent()
+	if parent == null:
+		return false
+	for child in parent.get_children():
+		if child is Button:
+			var label := (child as Button).text
+			if label == "Output" or label == "Debugger" or label == "Audio":
+				return true
+	return false
 
 func _sync_uv_editor_selection() -> void:
 	if uv_editor_panel == null:
@@ -1846,7 +2035,10 @@ func apply_faces_material(mesh: PBMesh, target_faces: Array, material: Material)
 			% (previous.resource_name if previous != null else "(none)"))
 
 	var before := PBCommand.copy_mesh_data(mesh.pb_mesh_data)
-	mesh.pb_mesh_data.set_faces_material(target_faces, prepared)
+	if PBAtlasTile.is_atlas_source(prepared) or PBAtlasTile.is_wrapper(prepared):
+		PBAtlasTile.apply_to_faces(mesh.pb_mesh_data, target_faces, prepared)
+	else:
+		mesh.pb_mesh_data.set_faces_material(target_faces, prepared)
 	var after := PBCommand.copy_mesh_data(mesh.pb_mesh_data)
 
 	var undo := get_undo_redo()

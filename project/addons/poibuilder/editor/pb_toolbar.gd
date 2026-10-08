@@ -63,6 +63,9 @@ signal uv_editor_requested
 
 ## Emitted when the user clicks "Export..." to open the map export dialog.
 signal export_requested
+## Emitted when the user picks a target from the Bake menu. Unlike Export,
+## this one stays in the scene: `mode` is a PBSceneBaker.BakeMode.
+signal bake_requested(mode: int)
 ## Emitted when the user clicks Docs to open the bundled HTML site.
 signal docs_requested
 ## Emitted when the user selects a Time of Day environment preset from the toolbar.
@@ -120,6 +123,7 @@ signal vertex_snap_toggled(pressed: bool)
 signal proportional_toggled(pressed: bool)
 signal proportional_radius_changed(radius: float)
 var _logo: TextureRect
+var _lbl_brand: Label
 var _btn_move: Button
 var _btn_rotate: Button
 var _btn_scale: Button
@@ -142,6 +146,7 @@ var _op_buttons: Dictionary = {}
 var _btn_settings: Button
 var _btn_env: MenuButton
 var _btn_export_more: Button
+var _btn_bake: MenuButton
 var _btn_docs: Button
 var _btn_pop_out: MenuButton
 var _floating_window: Window = null
@@ -206,6 +211,16 @@ func _build_ui() -> void:
 	_row4 = _make_flow_row("Row4")
 	_row4.visible = true
 	add_child(_row4)
+
+	# Header: brand text sits in the dock-grabber strip so Move/Rotate/Scale
+	# receive clicks (same idea as AssetPlacer's version label).
+	_lbl_brand = Label.new()
+	_lbl_brand.name = "BrandLabel"
+	_lbl_brand.text = "PoiBuilder 0.9.167"
+	_lbl_brand.tooltip_text = "PoiBuilder 0.9.167"
+	_lbl_brand.mouse_filter = Control.MOUSE_FILTER_STOP
+	_lbl_brand.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_lbl_brand.add_theme_color_override("font_color", Color(0.7, 0.75, 0.8))
 
 	# Header: Logo + Split Rows button (placed on the left so it's never cut off)
 	_logo = TextureRect.new()
@@ -499,6 +514,21 @@ func _build_ui() -> void:
 	_btn_export_more.tooltip_text = "Export...: open the export dialog (PBM default; GLB modern bake or retro vertex-lit, bake options)"
 	_btn_export_more.pressed.connect(func(): export_requested.emit())
 
+	# Bake group — Export writes a file; Bake replaces the selected PBMesh with
+	# ordinary MeshInstance3D geometry in THIS scene and hides the source.
+	_btn_bake = MenuButton.new()
+	_btn_bake.name = "BakeButton"
+	_btn_bake.text = "Bake"
+	_btn_bake.flat = true
+	_btn_bake.focus_mode = Control.FOCUS_NONE
+	_btn_bake.tooltip_text = "Bake: turn the selected PBMesh into a plain MeshInstance3D in this scene, with its collider as a StaticBody3D child (the PBMesh is hidden, not deleted)"
+	var bake_popup: PopupMenu = _btn_bake.get_popup()
+	bake_popup.add_item("To MeshInstance3D (as-is)", PBSceneBaker.BakeMode.AS_IS)
+	bake_popup.add_item("To MeshInstance3D (baked textures)", PBSceneBaker.BakeMode.BAKED)
+	bake_popup.set_item_tooltip(0, "Freezes the mesh exactly as the viewport shows it. Painted faces keep their splat shader, so nothing is lost inside Godot.")
+	bake_popup.set_item_tooltip(1, "Composites splat paint and decals down into plain StandardMaterial3D textures — no PoiBuilder shader on the result. Lighting is left to the engine.")
+	bake_popup.id_pressed.connect(func(id: int): bake_requested.emit(id))
+
 	_btn_docs = Button.new()
 	_btn_docs.name = "DocsButton"
 	_btn_docs.icon = _load_icon("icon_docs.svg")
@@ -604,7 +634,7 @@ func _update_row_layout() -> void:
 		_row4.visible = _extended_visible
 
 	# Row 1: Header | Tools | Mesh Operations | Env
-	var grp_header: Array[Control] = [_logo, _btn_split_rows]
+	var grp_header: Array[Control] = [_lbl_brand, _logo, _btn_split_rows]
 	var grp_tools: Array[Control] = [_sep_tools, _btn_move, _btn_rotate, _btn_scale]
 	var grp_ops: Array[Control] = [
 		_sep_ops,
@@ -627,7 +657,7 @@ func _update_row_layout() -> void:
 	var grp_shapes: Array[Control] = [_sep_shapes, _btn_new_shape, _btn_ngon, _btn_edit_params]
 	var grp_docks: Array[Control] = [
 		_sep_docks, _btn_materials, _btn_uv_editor, _btn_overlay, _btn_recover_overlay,
-		_btn_settings, _sep_export, _btn_export_more, _btn_docs, _btn_pop_out
+		_btn_settings, _sep_export, _btn_export_more, _btn_bake, _btn_docs, _btn_pop_out
 	]
 	_row2.add_child(_btn_object)
 	_row2.add_child(_btn_vertex)
@@ -869,6 +899,9 @@ func _on_selection_info_changed(_arg = null) -> void:
 		_op_buttons["csg_intersect"].disabled = false
 	if _op_buttons.has("smooth_auto"):
 		_op_buttons["smooth_auto"].disabled = not has_mesh
+		# Bake needs a PBMesh to bake, so unlike Export it IS context-gated.
+	if _btn_bake != null:
+		_btn_bake.disabled = not has_mesh
 	_btn_edit_params.disabled = not _active_mesh_editable()
 
 

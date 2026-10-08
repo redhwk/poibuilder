@@ -91,7 +91,9 @@ static func extrude_faces(mesh_data: PBMeshData, face_ids: PackedInt32Array,
 				qa, qb, qb2,
 				qb2, qa2, qa,
 			]))
-			var src_face: PBFace = mesh_data.faces[edge.get("face_idx", region[0])]
+			var region_face: PBFace = mesh_data.faces[edge.get("face_idx", region[0])]
+			var neighbor := _face_across_edge(mesh_data, edge["a"], edge["b"], region)
+			var src_face: PBFace = neighbor if neighbor != null else region_face
 			PBUv.setup_extruded_face_uvs(mesh_data, side, src_face, edge["a"], edge["b"], qa, qb)
 			sides.append(side)
 			drag_positions.append(qa2)
@@ -107,6 +109,7 @@ static func extrude_faces(mesh_data: PBMeshData, face_ids: PackedInt32Array,
 	for idx in drag_positions:
 		final_drag.append(remap.get(idx, idx))
 	result["drag_positions"] = final_drag
+	PBAtlasTile.sync_face_wrappers(mesh_data, result["new_face_ids"])
 	return result
 
 ## Insets each selected face independently: the face is replaced by a shrunken
@@ -250,6 +253,8 @@ static func subdivide_faces(mesh_data: PBMeshData, face_ids: PackedInt32Array) -
 			f.uv_swap_uv = face.uv_swap_uv
 			f.uv_fill = face.uv_fill
 			f.uv_anchor = face.uv_anchor
+			f.atlas_tile_origin = face.atlas_tile_origin
+			f.atlas_tile_size = face.atlas_tile_size
 			new_faces.append(f)
 
 		removed[fi] = true
@@ -353,6 +358,8 @@ static func subdivide_faces(mesh_data: PBMeshData, face_ids: PackedInt32Array) -
 		new_nface.uv_swap_uv = nface.uv_swap_uv
 		new_nface.uv_fill = nface.uv_fill
 		new_nface.uv_anchor = nface.uv_anchor
+		new_nface.atlas_tile_origin = nface.atlas_tile_origin
+		new_nface.atlas_tile_size = nface.atlas_tile_size
 		updated_neighbor_faces.append(new_nface)
 		removed[nfi] = true
 	var res := _replace_faces(mesh_data, removed, new_faces, updated_neighbor_faces)
@@ -503,6 +510,8 @@ static func merge_faces(mesh_data: PBMeshData, face_ids: PackedInt32Array) -> Di
 		face.uv_swap_uv = source.uv_swap_uv
 		face.uv_fill = source.uv_fill
 		face.uv_anchor = source.uv_anchor
+		face.atlas_tile_origin = source.atlas_tile_origin
+		face.atlas_tile_size = source.atlas_tile_size
 		merged_faces.append(face)
 		for fi in region:
 			removed[fi] = true
@@ -742,8 +751,10 @@ static func extrude_edges(mesh_data: PBMeshData, edge_ids: PackedInt32Array,
 	var final_drag := PackedInt32Array()
 	for idx in drag_positions:
 		final_drag.append(remap.get(idx, idx))
-	return {"ok": true, "new_face_ids": new_ids, "cap_face_ids": new_ids,
+	var edge_result := {"ok": true, "new_face_ids": new_ids, "cap_face_ids": new_ids,
 		"drag_positions": final_drag}
+	PBAtlasTile.sync_face_wrappers(mesh_data, new_ids)
+	return edge_result
 
 ## Bevels selected edges with a flat chamfer (segments = 1) or a multi-segment
 ## circular fillet (segments = 2..8) — see PBMeshBevel, which owns the op.
@@ -2173,6 +2184,26 @@ static func _region_boundary_edges(mesh_data: PBMeshData, region: PackedInt32Arr
 		if usage[key] == 1:
 			result.append(directed[key])
 	return result
+
+## Face on the other side of a physical edge, excluding `region` (the faces
+## being extruded). New extrude walls inherit that neighbor's material/tile
+## so a side pull keeps the top wrap on the new lid, and a top pull keeps
+## the side materials on the new walls.
+static func _face_across_edge(mesh_data: PBMeshData, edge_a: int, edge_b: int,
+		exclude_region: PackedInt32Array) -> PBFace:
+	if mesh_data == null:
+		return null
+	var key := _coord_edge_key(mesh_data, edge_a, edge_b)
+	var skip := {}
+	for fi in exclude_region:
+		skip[int(fi)] = true
+	for fi in range(mesh_data.faces.size()):
+		if skip.has(fi) or mesh_data.faces[fi] == null:
+			continue
+		for e in mesh_data.faces[fi].get_edges():
+			if _coord_edge_key(mesh_data, e.a, e.b) == key:
+				return mesh_data.faces[fi]
+	return null
 
 static func _region_submesh(mesh_data: PBMeshData, region: PackedInt32Array) -> int:
 	return mesh_data.faces[region[0]].submesh_index
